@@ -1,0 +1,19 @@
+cargo-features = ["panic-immediate-abort"]
+
+[package]
+name = "wifi-tui"
+version = "0.1.0"
+edition = "2021"
+description = "TUI WiFi manager using wpa_supplicant"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+anyhow = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "immediate-abort"
