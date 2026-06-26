@@ -154,6 +154,7 @@ int main(int argc, char **argv)
 			long remain = (long)idle_sec - (long)(now - last_input);
 			if (remain <= 0) {
 				if (ioctl(fbfd, FBIOBLANK, 1) == 0) blanked = 1;
+				else { poll(0, 0, 1000); }
 				continue;
 			}
 			timeout = (int)(remain * 1000);
@@ -196,26 +197,41 @@ int main(int argc, char **argv)
 		}
 
 do_poll: {
-		int r = poll(pfd, nfd, timeout);
-		if (r < 0) {
-			if (errno == EINTR) continue;
-			eperr("poll"); break;
-		}
-		if (r > 0) {
-			if (blanked) { ioctl(fbfd, FBIOBLANK, 0); blanked = 0; }
-			slept = 0;
-			last_input = time(NULL);
-			for (int i = 0; i < nfd; i++) {
-				if (pfd[i].revents & (POLLIN | POLLHUP)) {
-					struct input_event ev;
-					while (read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev)) {}
+			int r = poll(pfd, nfd, timeout);
+			if (r < 0) {
+				if (errno == EINTR) continue;
+				eperr("poll"); break;
+			}
+			if (r > 0) {
+				int got_input = 0;
+				for (int i = 0; i < nfd; i++) {
+					if (pfd[i].revents & POLLIN) {
+						struct input_event ev;
+						while (read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev))
+							got_input = 1;
+					}
+					if (pfd[i].revents & (POLLHUP | POLLERR)) {
+						/* Device gone (post-resume re-enumeration).
+						   Reinit all inputs so stale fd won't keep
+						   poll() returning instantly -> busy loop. */
+						for (int j = 0; j < nfd; j++) close(pfd[j].fd);
+						nfd = scan_inputs(pfd, MAX_INPUTS);
+						if (nfd == 0) { eputs("all inputs lost\n"); goto cleanup; }
+						got_input = 0;
+						break;
+					}
+					pfd[i].revents = 0;
 				}
-				pfd[i].revents = 0;
+				if (got_input) {
+					if (blanked) { ioctl(fbfd, FBIOBLANK, 0); blanked = 0; }
+					slept = 0;
+					last_input = time(NULL);
+				}
 			}
 		}
 	}
-	}
 
+cleanup:
 	if (blanked) ioctl(fbfd, FBIOBLANK, 0);
 	for (int i = 0; i < nfd; i++) close(pfd[i].fd);
 	close(fbfd);
