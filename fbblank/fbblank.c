@@ -19,14 +19,7 @@
 static volatile sig_atomic_t g_running = 1;
 static pid_t g_child_pid = 0;
 
-/* minimal write helpers — avoid pulling in printf machinery */
-
-static void eputs(const char *s)
-{
-	const char *p = s;
-	while (*p) p++;
-	write(STDERR_FILENO, s, (size_t)(p - s));
-}
+static void eputs(const char *s) { write(STDERR_FILENO, s, strlen(s)); }
 
 static void eputs_i(int n)
 {
@@ -91,7 +84,6 @@ static int is_key_device(int fd)
 	return 0;
 }
 
-/* scan /dev/input/event* for keyboard devices */
 static int scan_inputs(struct pollfd *pfd, int max)
 {
 	int n = 0;
@@ -101,11 +93,8 @@ static int scan_inputs(struct pollfd *pfd, int max)
 	while ((e = readdir(d)) && n < max) {
 		if (strncmp(e->d_name, "event", 5) != 0) continue;
 		if (e->d_name[5] < '0' || e->d_name[5] > '9') continue;
-		char path[24];
-		memcpy(path, "/dev/input/", 11);
-		char *dst = path + 11;
-		const char *src = e->d_name;
-		while ((*dst++ = *src++));
+		char path[24] = "/dev/input/";
+		strcpy(path + 11, e->d_name);
 		int fd = open(path, O_RDONLY | O_NONBLOCK);
 		if (fd < 0) continue;
 		if (!is_key_device(fd)) { close(fd); continue; }
@@ -172,6 +161,10 @@ int main(int argc, char **argv)
 			time_t now = time(NULL);
 			long remain = (long)sleep_sec - (long)(now - last_input);
 			if (remain <= 0) {
+				/* Unblank before suspend so the kernel resumes
+				   with the display in a known-good state. */
+				ioctl(fbfd, FBIOBLANK, 0);
+
 				eputs("fbblank: running sleep command: ");
 				eputs(sleep_cmd); eputs("\n");
 				int ret = run_cmd(sleep_cmd);
