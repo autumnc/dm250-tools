@@ -185,6 +185,15 @@ int main(int argc, char **argv)
 					goto do_poll;
 				}
 				slept = 1;
+				/* After resume, input/fb FDs may be stale. Reinit. */
+				for (int i = 0; i < nfd; i++) close(pfd[i].fd);
+				close(fbfd);
+				fbfd = open(fbdev, O_RDWR);
+				if (fbfd < 0) { eperr("open fb after sleep"); break; }
+				nfd = scan_inputs(pfd, MAX_INPUTS);
+				if (nfd == 0) { eputs("no input after sleep\n"); break; }
+				ioctl(fbfd, FBIOBLANK, 0);
+				blanked = 0;
 				last_input = time(NULL);
 				continue;
 			}
