@@ -8,7 +8,6 @@
 #include <time.h>
 #include <poll.h>
 #include <dirent.h>
-#include <sys/wait.h>
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <linux/input-event-codes.h>
@@ -17,56 +16,21 @@
 #define MAX_INPUTS 16
 
 static volatile sig_atomic_t g_running = 1;
-static pid_t g_child_pid = 0;
 
 static void eputs(const char *s) { write(STDERR_FILENO, s, strlen(s)); }
-
-static void eputs_i(int n)
-{
-	char b[12], t[12];
-	int i = 0, j = 0;
-	if (n < 0) { b[i++] = '-'; n = -n; }
-	do { t[j++] = '0' + (char)(n % 10); n /= 10; } while (n);
-	while (j) b[i++] = t[--j];
-	write(STDERR_FILENO, b, (size_t)i);
-}
 
 static void eperr(const char *s)
 {
 	eputs(s);
 	eputs(": ");
-	eputs_i(errno);
+	char b[12];
+	int n = errno, i = 0;
+	do { b[i++] = '0' + (n % 10); n /= 10; } while (n);
+	while (i) { char c = b[--i]; write(STDERR_FILENO, &c, 1); }
 	eputs("\n");
 }
 
-static void on_signal(int s)
-{
-	(void)s;
-	g_running = 0;
-	if (g_child_pid > 0) kill(g_child_pid, SIGTERM);
-}
-
-static void on_alarm(int s) { (void)s; }
-
-static int run_cmd(const char *cmd)
-{
-	pid_t pid = fork();
-	if (pid < 0) { eperr("fork"); return -1; }
-	if (pid == 0) {
-		execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
-		_exit(127);
-	}
-	g_child_pid = pid;
-	int status;
-	while (waitpid(pid, &status, 0) < 0) {
-		if (errno == EINTR) continue;
-		eperr("waitpid");
-		g_child_pid = 0;
-		return -1;
-	}
-	g_child_pid = 0;
-	return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-}
+static void on_signal(int s) { (void)s; g_running = 0; }
 
 static int is_key_device(int fd)
 {
@@ -109,30 +73,19 @@ static int scan_inputs(struct pollfd *pfd, int max)
 
 int main(int argc, char **argv)
 {
-	int idle_sec = 300, sleep_sec = 0;
-	const char *sleep_cmd = NULL, *fbdev = "/dev/fb0";
+	int idle_sec = 300;
+	const char *fbdev = "/dev/fb0";
 	int opt;
-	while ((opt = getopt(argc, argv, "t:s:c:f:h")) != -1) {
+	while ((opt = getopt(argc, argv, "t:f:h")) != -1) {
 		switch (opt) {
 		case 't': idle_sec = atoi(optarg); break;
-		case 's': sleep_sec = atoi(optarg); break;
-		case 'c': sleep_cmd = optarg; break;
 		case 'f': fbdev = optarg; break;
 		default:
-			eputs("usage: fbblank [-t idle_sec] [-s sleep_sec] [-c cmd] [-f /dev/fbN]\n");
+			eputs("usage: fbblank [-t idle_sec] [-f /dev/fbN]\n");
 			return opt == 'h' ? 0 : 1;
 		}
 	}
 	if (idle_sec <= 0) { eputs("idle time must be > 0\n"); return 1; }
-	if (sleep_sec > 0 && sleep_sec <= idle_sec) {
-		eputs("sleep_sec ("); eputs_i(sleep_sec);
-		eputs(") must be > idle_sec ("); eputs_i(idle_sec); eputs(")\n");
-		return 1;
-	}
-	if (sleep_sec > 0 && !sleep_cmd) {
-		eputs("-s requires -c <command>\n");
-		return 1;
-	}
 
 	int fbfd = open(fbdev, O_RDWR);
 	if (fbfd < 0) { eperr("open fb"); return 1; }
@@ -145,10 +98,8 @@ int main(int argc, char **argv)
 	sa.sa_handler = on_signal;
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT,  &sa, NULL);
-	sa.sa_handler = on_alarm;
-	sigaction(SIGALRM, &sa, NULL);
 
-	int blanked = 0, slept = 0;
+	int blanked = 0;
 	time_t last_input = time(NULL);
 
 	while (g_running) {
@@ -158,52 +109,6 @@ int main(int argc, char **argv)
 			long remain = (long)idle_sec - (long)(now - last_input);
 			if (remain <= 0) {
 				if (ioctl(fbfd, FBIOBLANK, 1) == 0) blanked = 1;
-				else { poll(0, 0, 1000); }
-				continue;
-			}
-			timeout = (int)(remain * 1000);
-		} else if (sleep_sec > 0 && !slept) {
-			time_t now = time(NULL);
-			long remain = (long)sleep_sec - (long)(now - last_input);
-			if (remain <= 0) {
-				/* Unblank before suspend so the kernel resumes
-				   with the display in a known-good state. */
-				ioctl(fbfd, FBIOBLANK, 0);
-
-				eputs("fbblank: running sleep command: ");
-				eputs(sleep_cmd); eputs("\n");
-				int ret = run_cmd(sleep_cmd);
-				if (ret != 0) {
-					eputs("fbblank: sleep command failed (");
-					eputs_i(ret); eputs("), retrying after ");
-					eputs_i(sleep_sec - idle_sec); eputs(" s\n");
-					last_input = time(NULL);
-					remain = sleep_sec;
-					timeout = (int)(remain * 1000);
-					goto do_poll;
-				}
-				slept = 1;
-				/* After resume, input/fb FDs may be stale. Reinit.
-				   Use alarm to bound close() in case kernel driver
-				   blocks on a disconnected device node. */
-				alarm(2);
-				for (int i = 0; i < nfd; i++) close(pfd[i].fd);
-				close(fbfd);
-				alarm(0);
-				fbfd = open(fbdev, O_RDWR);
-				if (fbfd < 0) { eperr("open fb after sleep"); break; }
-				nfd = scan_inputs(pfd, MAX_INPUTS);
-				/* Kernel may still be re-enumerating input devices after
-				   resume; the keyboard node can be temporarily absent.
-				   Retry a few times with a short delay. */
-				for (int retry = 0; nfd == 0 && retry < 10; retry++) {
-					poll(0, 0, 200);
-					nfd = scan_inputs(pfd, MAX_INPUTS);
-				}
-				if (nfd == 0) { eputs("no input after sleep\n"); break; }
-				ioctl(fbfd, FBIOBLANK, 0);
-				blanked = 0;
-				last_input = time(NULL);
 				continue;
 			}
 			timeout = (int)(remain * 1000);
@@ -211,52 +116,28 @@ int main(int argc, char **argv)
 			timeout = -1;
 		}
 
-do_poll: {
-			int r = poll(pfd, nfd, timeout);
-			if (r < 0) {
-				if (errno == EINTR) continue;
-				eperr("poll"); break;
+		int r = poll(pfd, nfd, timeout);
+		if (r < 0) {
+			if (errno == EINTR) continue;
+			eperr("poll"); break;
+		}
+		if (r == 0) continue;
+
+		int got_input = 0;
+		for (int i = 0; i < nfd; i++) {
+			if (pfd[i].revents & POLLIN) {
+				struct input_event ev;
+				while (read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev))
+					got_input = 1;
 			}
-			if (r > 0) {
-				int got_input = 0;
-				for (int i = 0; i < nfd; i++) {
-					if (pfd[i].revents & POLLIN) {
-						struct input_event ev;
-						while (read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev))
-							got_input = 1;
-					}
-					if (pfd[i].revents & (POLLHUP | POLLERR)) {
-						/* Device gone (e.g. SD card hotplug triggers
-						   bus re-enumeration).  Bounded close to
-						   prevent blocking on a stale driver fd,
-						   then cooldown to avoid a busy loop when
-						   the kernel is still re-enumerating. */
-						alarm(2);
-						for (int j = 0; j < nfd; j++) close(pfd[j].fd);
-						alarm(0);
-						nfd = scan_inputs(pfd, MAX_INPUTS);
-						for (int retry = 0; nfd == 0 && retry < 10; retry++) {
-							poll(0, 0, 200);
-							nfd = scan_inputs(pfd, MAX_INPUTS);
-						}
-						if (nfd == 0) { eputs("all inputs lost\n"); goto cleanup; }
-						got_input = 0;
-						poll(0, 0, 500);       /* cooldown: let kernel settle */
-						last_input = time(NULL); /* reset idle timer */
-						break;
-					}
-					pfd[i].revents = 0;
-				}
-				if (got_input) {
-					if (blanked) { ioctl(fbfd, FBIOBLANK, 0); blanked = 0; }
-					slept = 0;
-					last_input = time(NULL);
-				}
-			}
+			pfd[i].revents = 0;
+		}
+		if (got_input) {
+			if (blanked) { ioctl(fbfd, FBIOBLANK, 0); blanked = 0; }
+			last_input = time(NULL);
 		}
 	}
 
-cleanup:
 	if (blanked) ioctl(fbfd, FBIOBLANK, 0);
 	for (int i = 0; i < nfd; i++) close(pfd[i].fd);
 	close(fbfd);
