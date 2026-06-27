@@ -185,6 +185,13 @@ int main(int argc, char **argv)
 				fbfd = open(fbdev, O_RDWR);
 				if (fbfd < 0) { eperr("open fb after sleep"); break; }
 				nfd = scan_inputs(pfd, MAX_INPUTS);
+				/* Kernel may still be re-enumerating input devices after
+				   resume; the keyboard node can be temporarily absent.
+				   Retry a few times with a short delay. */
+				for (int retry = 0; nfd == 0 && retry < 10; retry++) {
+					poll(0, 0, 200);
+					nfd = scan_inputs(pfd, MAX_INPUTS);
+				}
 				if (nfd == 0) { eputs("no input after sleep\n"); break; }
 				ioctl(fbfd, FBIOBLANK, 0);
 				blanked = 0;
@@ -216,6 +223,12 @@ do_poll: {
 						   poll() returning instantly -> busy loop. */
 						for (int j = 0; j < nfd; j++) close(pfd[j].fd);
 						nfd = scan_inputs(pfd, MAX_INPUTS);
+						/* Retry if kernel is mid-re-enumeration and the
+						   keyboard device node doesn't exist yet. */
+						for (int retry = 0; nfd == 0 && retry < 10; retry++) {
+							poll(0, 0, 200);
+							nfd = scan_inputs(pfd, MAX_INPUTS);
+						}
 						if (nfd == 0) { eputs("all inputs lost\n"); goto cleanup; }
 						got_input = 0;
 						break;
