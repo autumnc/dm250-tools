@@ -46,6 +46,8 @@ static void on_signal(int s)
 	if (g_child_pid > 0) kill(g_child_pid, SIGTERM);
 }
 
+static void on_alarm(int s) { (void)s; }
+
 static int run_cmd(const char *cmd)
 {
 	pid_t pid = fork();
@@ -143,6 +145,8 @@ int main(int argc, char **argv)
 	sa.sa_handler = on_signal;
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT,  &sa, NULL);
+	sa.sa_handler = on_alarm;
+	sigaction(SIGALRM, &sa, NULL);
 
 	int blanked = 0, slept = 0;
 	time_t last_input = time(NULL);
@@ -179,9 +183,13 @@ int main(int argc, char **argv)
 					goto do_poll;
 				}
 				slept = 1;
-				/* After resume, input/fb FDs may be stale. Reinit. */
+				/* After resume, input/fb FDs may be stale. Reinit.
+				   Use alarm to bound close() in case kernel driver
+				   blocks on a disconnected device node. */
+				alarm(2);
 				for (int i = 0; i < nfd; i++) close(pfd[i].fd);
 				close(fbfd);
+				alarm(0);
 				fbfd = open(fbdev, O_RDWR);
 				if (fbfd < 0) { eperr("open fb after sleep"); break; }
 				nfd = scan_inputs(pfd, MAX_INPUTS);
@@ -218,19 +226,23 @@ do_poll: {
 							got_input = 1;
 					}
 					if (pfd[i].revents & (POLLHUP | POLLERR)) {
-						/* Device gone (post-resume re-enumeration).
-						   Reinit all inputs so stale fd won't keep
-						   poll() returning instantly -> busy loop. */
+						/* Device gone (e.g. SD card hotplug triggers
+						   bus re-enumeration).  Bounded close to
+						   prevent blocking on a stale driver fd,
+						   then cooldown to avoid a busy loop when
+						   the kernel is still re-enumerating. */
+						alarm(2);
 						for (int j = 0; j < nfd; j++) close(pfd[j].fd);
+						alarm(0);
 						nfd = scan_inputs(pfd, MAX_INPUTS);
-						/* Retry if kernel is mid-re-enumeration and the
-						   keyboard device node doesn't exist yet. */
 						for (int retry = 0; nfd == 0 && retry < 10; retry++) {
 							poll(0, 0, 200);
 							nfd = scan_inputs(pfd, MAX_INPUTS);
 						}
 						if (nfd == 0) { eputs("all inputs lost\n"); goto cleanup; }
 						got_input = 0;
+						poll(0, 0, 500);       /* cooldown: let kernel settle */
+						last_input = time(NULL); /* reset idle timer */
 						break;
 					}
 					pfd[i].revents = 0;
