@@ -1,8 +1,6 @@
 #!/bin/sh
 exec 2>&1
-# 空闲秒数与休眠命令，可在 /etc/sv/fbblank/conf 里覆盖
+# 空闲秒数，可在 /etc/sv/fbblank/conf 里覆盖
 IDLE="${IDLE:-300}"
-SLEEP="${SLEEP:-600}"
-SLEEP_CMD="${SLEEP_CMD:-zzz}"
 FBDEV="${FBDEV:-/dev/fb0}"
-exec chpst -b fbblank fbblank -t "$IDLE" -s "$SLEEP" -c "$SLEEP_CMD" -f "$FBDEV"
+exec chpst -b fbblank fbblank -t "$IDLE" -f "$FBDEV"
