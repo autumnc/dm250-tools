@@ -1,6 +1,0 @@
-#!/bin/sh
-exec 2>&1
-# 空闲秒数，可在 /etc/sv/fbblank/conf 里覆盖
-IDLE="${IDLE:-300}"
-FBDEV="${FBDEV:-/dev/fb0}"
-exec chpst -b fbblank fbblank -t "$IDLE" -f "$FBDEV"
