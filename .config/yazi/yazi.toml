@@ -1,0 +1,5 @@
+[preview]
+image_filter = "nearest"
+image_quality = 50
+max_width = 300
+max_height = 600

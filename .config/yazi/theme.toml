@@ -1,0 +1,25 @@
+[icon]
+default = "󰈚"
+folder = "󰉋"
+
+# 文件类型图标规则(按扩展名匹配)
+rules = [
+  # Shell 脚本相关
+  { name = "*.sh",   text = "󰆍", fg = "#89e051" },
+  { name = "*.bash", text = "󰆍", fg = "#89e051" },
+  { name = "*.zsh",  text = "󰆍", fg = "#89e051" },
+  { name = "*.fish", text = "󰆍", fg = "#89e051" },
+
+  # 其他常见类型(按需添加)
+  { name = "*.py",   text = "󰌠", fg = "#ffbc03" },
+  { name = "*.rs",   text = "󱘗", fg = "#dea584" },
+  { name = "*.js",   text = "󰌞", fg = "#cbcb41" },
+  { name = "*.ts",   text = "󰛦", fg = "#519aba" },
+  { name = "*.json", text = "󰘦", fg = "#cbcb41" },
+  { name = "*.md",   text = "󰍔", fg = "#519aba" },
+  { name = "*.toml", text = "󰅪", fg = "#519aba" },
+  { name = "*.yml",  text = "󰅪", fg = "#519aba" },
+]
+
+[flavor]
+dark = "everforest-medium"

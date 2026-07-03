@@ -1,0 +1,12 @@
+[plugin]
+deps = []
+
+[[flavor.deps]]
+use = "kmlupreti/ayu-dark"
+rev = "00804da"
+hash = "d2ce8358c59ea6e8552091075b3a191c"
+
+[[flavor.deps]]
+use = "Chromium-3-Oxide/everforest-medium"
+rev = "e1ead7b"
+hash = "f7dc46200e53da5e94858630184a9220"
