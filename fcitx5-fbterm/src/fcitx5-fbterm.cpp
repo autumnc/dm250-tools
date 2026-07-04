@@ -171,10 +171,9 @@ private:
     std::vector<CandSeg> upSegs_;   // preedit segments
     std::vector<CandSeg> downSegs_; // candidate segments
     int cursorPos_ = -1;
-    int preeditLen_ = 0;
     ColorType foreground_ = Black;
     ColorType background_ = White;
-    ColorType highlightColor_ = Blue;
+    ColorType highlightColor_ = DarkBlue;
     bool quit_ = false;
 };
 
@@ -412,21 +411,14 @@ void FcitxFbterm::im_show() {
         x += text_width(seg.text.c_str()) * fontWidth_;
     }
 
-    // Draw cursor on preedit line
-    if (cursorPos_ >= 0) {
-        int cursorX = rect.x + PAD;
-        int pos = 0;
-        for (auto &seg : upSegs_) {
-            int w = text_width(seg.text.c_str());
-            if (pos + w > cursorPos_) {
-                int off = text_width(
-                    std::string_view(seg.text).substr(0, cursorPos_ - pos));
-                cursorX += off * fontWidth_;
-                break;
-            }
-            pos += w;
-            cursorX += w * fontWidth_;
-        }
+    // Draw cursor on preedit line (cursorPos_ is byte offset)
+    if (cursorPos_ >= 0 && !upSegs_.empty()) {
+        auto &text = upSegs_[0].text;
+        auto byteOff =
+            std::min(static_cast<size_t>(cursorPos_), text.size());
+        auto cellOff = static_cast<int>(
+            text_width(std::string_view(text).substr(0, byteOff)));
+        int cursorX = rect.x + PAD + cellOff * fontWidth_;
         Rectangle cursorRect = {cursorX, rect.y + PAD, 1, fontHeight_};
         fill_rect(cursorRect, foreground_);
     }
@@ -662,7 +654,6 @@ void FcitxFbterm::fcitx_fbterm_update_client_side_ui_cb(
         preeditText = std::string(preeditText.data(), cut - preeditText.data()) + "\342\200\246";
     }
     upSegs_.push_back({preeditText, foreground_});
-    preeditLen_ = preeditText.size();
 
     // Pre-calculate candidate widths
     struct CandInfo {
