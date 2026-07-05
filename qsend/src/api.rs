@@ -177,16 +177,63 @@ fn text_to_html(text: &str) -> String {
     if text.starts_with('<') {
         return text.to_string();
     }
-    text.split('\n')
-        .map(|line| {
-            if line.trim().is_empty() {
-                "<p><br></p>".to_string()
-            } else {
-                format!("<p>{}</p>", line)
+
+    static BOLD_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\*\*(.+?)\*\*").unwrap());
+    static UNDERLINE_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"__(.+?)__").unwrap());
+    static HIGHLIGHT_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"==(.+?)==").unwrap());
+
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut result = String::new();
+    let mut in_list = false;
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+
+        let is_li = line.starts_with("- ") || line.starts_with("* ");
+
+        if is_li {
+            if !in_list {
+                result.push_str("<ul>");
+                in_list = true;
             }
-        })
-        .collect::<Vec<_>>()
-        .join("")
+            let content = &line[2..];
+            let content = apply_inline(&BOLD_RE, &UNDERLINE_RE, &HIGHLIGHT_RE, content);
+            result.push_str(&format!("<li>{}</li>", content));
+        } else {
+            if in_list {
+                result.push_str("</ul>");
+                in_list = false;
+            }
+            if line.is_empty() {
+                result.push_str("<p><br></p>");
+            } else {
+                let content = apply_inline(&BOLD_RE, &UNDERLINE_RE, &HIGHLIGHT_RE, line);
+                result.push_str(&format!("<p>{}</p>", content));
+            }
+        }
+        i += 1;
+    }
+
+    if in_list {
+        result.push_str("</ul>");
+    }
+
+    result
+}
+
+fn apply_inline(
+    bold: &regex::Regex,
+    underline: &regex::Regex,
+    highlight: &regex::Regex,
+    text: &str,
+) -> String {
+    let text = bold.replace_all(text, r"<strong>$1</strong>").to_string();
+    let text = underline.replace_all(&text, r"<u>$1</u>").to_string();
+    highlight.replace_all(&text, r"<mark>$1</mark>").to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
