@@ -22,7 +22,7 @@ static const char *main_font_presets[][3] = {
     {"font-names=Go\\-Song2 Propo:style=Regular",
      "font-names-bold=Go\\-Song2:style=Bold",
      "Go Mono+宋二"},
-    {"font-names=FZFW ZhuZi MinchoS:style=Regular",
+    {"font-names=ZhongHuaSongPlane00:style=Regular",
      "font-names-bold=FZFW ZhuZi MinchoS:style=Bold",
      "Xenon+书局宋"},
     {"font-names=Terminus Song:style=Regular",
