@@ -1,0 +1,11 @@
+#!/bin/bash
+# WiFi toggle for DM250 (Rockchip rkwifi driver)
+STATE=$(cat /sys/class/rkwifi/driver 2>/dev/null)
+if [ "$STATE" = "0" ]; then
+    echo 1 > /sys/class/rkwifi/driver 2>/dev/null
+elif [ "$STATE" = "1" ]; then
+    echo 0 > /sys/class/rkwifi/driver 2>/dev/null
+else
+    echo "Error: unable to read WiFi state" >&2
+    exit 1
+fi
