@@ -277,35 +277,43 @@ static void msg_dialog(const char *title, const char *msg) {
 
 /* ---------- text input dialog ---------- */
 static int input_dialog(const char *title, const char *prompt, char *buf, int buf_size) {
+    int prompt_lines = 1;
+    for (const char *p = prompt; *p; p++)
+        if (*p == '\n') prompt_lines++;
+
     int width = 56;
     if (width > term_w - 4) width = term_w - 4;
+    int height = 5 + prompt_lines; /* title + prompt + input + gap + help */
+    if (height < 7) height = 7;
+
     clearok(curscr, TRUE);
     erase();
     refresh();
-    WINDOW *w = create_centered_win(7, width);
+    WINDOW *w = create_centered_win(height, width);
     if (!w) return 0;
 
     buf[0] = '\0';
     int pos = 0, len = 0;
     curs_set(1);
+    int input_y = 1 + prompt_lines; /* after prompt lines */
 
     for (;;) {
         werase(w);
         box(w, 0, 0);
         draw_title(w, width, title);
-        mvwprintw(w, 2, 2, "%s", prompt);
+        print_multiline(w, 1, 2, prompt);
 
         wattron(w, COLOR_PAIR(2));
         for (int i = 0; i < width - 6; i++)
-            mvwaddch(w, 3, 2 + i, ' ');
-        mvwprintw(w, 3, 3, "%s", buf);
+            mvwaddch(w, input_y, 2 + i, ' ');
+        mvwprintw(w, input_y, 3, "%s", buf);
         wattroff(w, COLOR_PAIR(2));
 
         wattron(w, COLOR_PAIR(4));
-        mvwprintw(w, 5, 2, "Enter 确认  Esc 取消");
+        mvwprintw(w, height - 2, 2, "Enter 确认  Esc 取消");
         wattroff(w, COLOR_PAIR(4));
 
-        wmove(w, 3, 3 + pos);
+        wmove(w, input_y, 3 + pos);
         frefresh(w);
 
         int ch = wgetch(w);
@@ -436,7 +444,8 @@ static void show_font_info(WINDOW *w, int y, int win_width) {
         if (*p == '\0' || *p == '#') continue;
         if (strncmp(p, "font-names=", 11) == 0 ||
             strncmp(p, "font-names-bold=", 16) == 0 ||
-            strncmp(p, "font-names-italic=", 18) == 0) {
+            strncmp(p, "font-names-italic=", 18) == 0 ||
+            strncmp(p, "font-size=", 10) == 0) {
             int vlen = (int)strlen(p);
             if (vlen > maxval)
                 mvwprintw(w, row++, 2, "  当前: %.*s..", maxval - 2, p);
@@ -556,12 +565,50 @@ static void italic_font_menu(void) {
     }
 }
 
+static void font_size_menu(void) {
+    char current[32] = "未设置";
+    FileContent *fc = read_file(FBTERM_MODRC);
+    if (fc) {
+        for (int i = 0; i < fc->count; i++) {
+            const char *p = fc->lines[i];
+            while (*p == '#' || *p == ' ' || *p == '\t') p++;
+            if (strncmp(p, "font-size=", 10) == 0) {
+                snprintf(current, sizeof(current), "%s", p + 10);
+                break;
+            }
+        }
+        free_file_content(fc);
+    }
+
+    char prompt[64];
+    snprintf(prompt, sizeof(prompt), "当前字号: %s\n请输入新字号 (如 12, 14, 16):", current);
+    char new_size[32] = "";
+    if (!input_dialog("字体大小", prompt, new_size, sizeof(new_size)))
+        return;
+    if (new_size[0] == '\0') return;
+
+    fc = read_file(FBTERM_MODRC);
+    if (!fc) { msg_dialog("错误", "无法读取 fbterm-modrc"); return; }
+    char new_line[64];
+    snprintf(new_line, sizeof(new_line), "font-size=%s", new_size);
+    set_fbterm_key(fc, "font-size=", new_line);
+    write_file(fc, TMP_FBTERM);
+    free_file_content(fc);
+
+    if (confirm_dialog("确认", "应用字号设置?\n修改完成后注销重新登录起效。")) {
+        copy_file(TMP_FBTERM, FBTERM_MODRC);
+        msg_dialog("完成", "字号设置已应用。\n修改完成后注销重新登录起效。");
+    }
+    unlink(TMP_FBTERM);
+}
+
 static void font_settings_menu(void) {
-    const char *items[] = {"主字体设置", "斜体设置"};
+    const char *items[] = {"主字体设置", "斜体设置", "字体大小"};
     for (;;) {
-        int sel = menu_select(" 字体设置 ", items, 2, 1, "↑↓/jk 选择  Enter 确认  Esc 返回");
+        int sel = menu_select(" 字体设置 ", items, 3, 1, "↑↓/jk 选择  Enter 确认  Esc 返回");
         if (sel == 0) main_font_menu();
         else if (sel == 1) italic_font_menu();
+        else if (sel == 2) font_size_menu();
         else return;
     }
 }
