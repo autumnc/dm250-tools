@@ -463,9 +463,13 @@ void FcitxFbterm::im_show() {
 
         // Ensure cursor within window bounds
         if (cursorX >= rect.x && cursorX < rect.x + rect.w) {
-            // Clear old cursor position if changed
-            if (lastCursorPos_ >= 0 && lastCursorPos_ != cursorPos_) {
-                Rectangle oldCursorRect = {lastCursorX_, rect.y + PAD, 1, fontHeight_};
+            // Clear old cursor if:
+            // 1. Cursor position changed
+            // 2. OR window position/size changed (rectChanged)
+            //    because lastCursorX_ is in old window coordinate system
+            if (lastCursorPos_ >= 0 && (lastCursorPos_ != cursorPos_ || rectChanged)) {
+                // Use lastCursorX_ (absolute coordinate from old window)
+                Rectangle oldCursorRect = {lastCursorX_, lastRect_.y + PAD, 1, fontHeight_};
                 fill_rect(oldCursorRect, background_);
             }
 
@@ -475,6 +479,13 @@ void FcitxFbterm::im_show() {
 
             lastCursorPos_ = cursorPos_;
             lastCursorX_ = cursorX;
+        }
+    } else {
+        // No cursor visible, clear old cursor if exists
+        if (lastCursorPos_ >= 0) {
+            Rectangle oldCursorRect = {lastCursorX_, lastRect_.y + PAD, 1, fontHeight_};
+            fill_rect(oldCursorRect, background_);
+            lastCursorPos_ = -1;
         }
     }
 }
