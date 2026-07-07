@@ -11,6 +11,7 @@
 #define BL_MIN   30
 #define BL_MAX   150
 #define STEP     5
+#define FINE     1
 #define IDLE_SEC 3
 #define BAR_W    20
 
@@ -134,6 +135,24 @@ int main(void)
                         val = from_pct(to_pct(val) + STEP);
                         write_val(val);
                         draw(val);
+                    } else if (c2 == '[' && nr == 1) {             /* arrow keys */
+                        if (rest[0] == 'D') {       /* Left: dim 1% */
+                            val = from_pct(to_pct(val) - FINE);
+                            write_val(val);
+                            draw(val);
+                        } else if (rest[0] == 'C') { /* Right: brighten 1% */
+                            val = from_pct(to_pct(val) + FINE);
+                            write_val(val);
+                            draw(val);
+                        } else if (rest[0] == 'A') { /* Up: brighten 5% */
+                            val = from_pct(to_pct(val) + STEP);
+                            write_val(val);
+                            draw(val);
+                        } else if (rest[0] == 'B') { /* Down: dim 5% */
+                            val = from_pct(to_pct(val) - STEP);
+                            write_val(val);
+                            draw(val);
+                        }
                     }
                 }
             } else {

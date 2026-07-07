@@ -13,6 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcitx-utils/fs.h>
+#include <vector>
 
 #define OFFSET(TYPE, MEMBER) ((size_t)(&(((TYPE *)0)->MEMBER)))
 #define MSG(a) ((Message *)(a))
@@ -22,8 +23,6 @@ static ImCallbacks cbs;
 static char pending_msg_buf[10240];
 static unsigned pending_msg_buf_len = 0;
 static int im_active = 0;
-
-static void wait_message(MessageType type);
 
 void register_im_callbacks(ImCallbacks callbacks) { cbs = callbacks; }
 
@@ -53,7 +52,12 @@ void connect_fbterm(char raw) {
     msg.type = Connect;
     msg.len = sizeof(msg);
     msg.raw = (raw ? 1 : 0);
-    fcitx::fs::safeWrite(imfd, (char *)&msg, sizeof(msg));
+
+    ssize_t ret = fcitx::fs::safeWrite(imfd, (char *)&msg, sizeof(msg));
+    if (ret != sizeof(msg)) {
+        close(imfd);
+        imfd = -1;
+    }
 }
 
 void put_im_text(const char *text, unsigned len) {
@@ -61,13 +65,17 @@ void put_im_text(const char *text, unsigned len) {
         (OFFSET(Message, texts) + len > UINT16_MAX))
         return;
 
-    char buf[OFFSET(Message, texts) + len];
+    // Limit max length to prevent excessive memory usage
+    if (len > 4096) len = 4096;
 
-    MSG(buf)->type = PutText;
-    MSG(buf)->len = sizeof(buf);
-    memcpy(MSG(buf)->texts, text, len);
+    // Use std::vector instead of VLA to avoid stack overflow
+    std::vector<char> buf(OFFSET(Message, texts) + len);
 
-    fcitx::fs::safeWrite(imfd, buf, MSG(buf)->len);
+    MSG(buf.data())->type = PutText;
+    MSG(buf.data())->len = buf.size();
+    memcpy(MSG(buf.data())->texts, text, len);
+
+    fcitx::fs::safeWrite(imfd, buf.data(), MSG(buf.data())->len);
 }
 
 void set_im_window(unsigned id, Rectangle rect) {
@@ -81,7 +89,9 @@ void set_im_window(unsigned id, Rectangle rect) {
     msg.win.rect = rect;
 
     fcitx::fs::safeWrite(imfd, (char *)&msg, sizeof(msg));
-    wait_message(AckWin);
+    // Removed synchronous wait - fbterm-mod uses double buffering
+    // which guarantees no flicker when commands are batched
+    // wait_message(AckWin);
 }
 
 void fill_rect(Rectangle rect, unsigned char color) {
@@ -100,18 +110,22 @@ void draw_text(unsigned x, unsigned y, unsigned char fc, unsigned char bc,
     if (!text || !len)
         return;
 
-    char buf[OFFSET(Message, drawText.texts) + len];
+    // Limit max length to prevent excessive memory usage
+    if (len > 10240) len = 10240;
 
-    MSG(buf)->type = DrawText;
-    MSG(buf)->len = sizeof(buf);
+    // Use std::vector instead of VLA to avoid stack overflow
+    std::vector<char> buf(OFFSET(Message, drawText.texts) + len);
 
-    MSG(buf)->drawText.x = x;
-    MSG(buf)->drawText.y = y;
-    MSG(buf)->drawText.fc = fc;
-    MSG(buf)->drawText.bc = bc;
-    memcpy(MSG(buf)->drawText.texts, text, len);
+    MSG(buf.data())->type = DrawText;
+    MSG(buf.data())->len = buf.size();
 
-    fcitx::fs::safeWrite(imfd, buf, MSG(buf)->len);
+    MSG(buf.data())->drawText.x = x;
+    MSG(buf.data())->drawText.y = y;
+    MSG(buf.data())->drawText.fc = fc;
+    MSG(buf.data())->drawText.bc = bc;
+    memcpy(MSG(buf.data())->drawText.texts, text, len);
+
+    fcitx::fs::safeWrite(imfd, buf.data(), MSG(buf.data())->len);
 }
 
 static int process_message(Message *msg) {
@@ -197,44 +211,6 @@ static int process_messages(char *buf, int len) {
     }
 
     return exit;
-}
-
-static void wait_message(MessageType type) {
-    int ack = 0;
-    while (!ack) {
-        char *cur = pending_msg_buf + pending_msg_buf_len;
-        int len =
-            read(imfd, cur, sizeof(pending_msg_buf) - pending_msg_buf_len);
-
-        if (len == -1 && (errno == EAGAIN || errno == EINTR))
-            continue;
-        else if (len <= 0) {
-            close(imfd);
-            imfd = -1;
-            return;
-        }
-
-        pending_msg_buf_len += len;
-
-        char *end = cur + len;
-        for (; cur < end && MSG(cur)->len <= (end - cur);
-             cur += MSG(cur)->len) {
-            if (MSG(cur)->type == type) {
-                memcpy(cur, cur + MSG(cur)->len, end - cur - MSG(cur)->len);
-                pending_msg_buf_len -= MSG(cur)->len;
-
-                ack = 1;
-                break;
-            }
-        }
-    }
-
-    if (pending_msg_buf_len) {
-        Message msg;
-        msg.type = Ping;
-        msg.len = sizeof(msg);
-        fcitx::fs::safeWrite(imfd, (char *)&msg, sizeof(msg));
-    }
 }
 
 int check_im_message() {

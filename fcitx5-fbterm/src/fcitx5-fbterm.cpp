@@ -85,6 +85,10 @@ void printUsage(std::string_view arg0) {
 struct CandSeg {
     std::string text;
     ColorType color;
+
+    bool operator==(const CandSeg& other) const {
+        return text == other.text && color == other.color;
+    }
 };
 
 } // namespace
@@ -166,11 +170,16 @@ private:
     bool active_ = false;
     bool fullwidth_ = false;
     bool raw_shift_ = false;
+    bool focusInCalled_ = false;  // Track focus_in state
     fcitx::KeyState state_;
     std::string statusText_; // status from auxDown (e.g. "雾", "A")
     std::vector<CandSeg> upSegs_;   // preedit segments
     std::vector<CandSeg> downSegs_; // candidate segments
+    std::vector<CandSeg> lastUpSegs_;   // cached for comparison
+    std::vector<CandSeg> lastDownSegs_; // cached for comparison
     int cursorPos_ = -1;
+    int lastCursorPos_ = -1;  // cached cursor position
+    int lastCursorX_ = 0;     // cached cursor X coordinate
     ColorType foreground_ = Black;
     ColorType background_ = White;
     ColorType highlightColor_ = DarkBlue;
@@ -341,10 +350,9 @@ void FcitxFbterm::im_deactive() {
 }
 
 void FcitxFbterm::im_show() {
-    // Rate limit: skip redraws within 50ms (avoid freeze on rapid cursor moves)
+    // Rate limit: skip content redraws within 50ms (but not cursor updates)
     int64_t now = g_get_monotonic_time();
-    if (now - lastShowTime_ < 50000) return;
-    lastShowTime_ = now;
+    bool skipContentRedraw = (now - lastShowTime_ < 50000);
 
     clearWin(WINID_ERROR);
 
@@ -356,6 +364,9 @@ void FcitxFbterm::im_show() {
         if (!seg.text.empty()) hasText = true;
     if (!hasText) {
         clearWin(WINID_IM);
+        lastUpSegs_.clear();
+        lastDownSegs_.clear();
+        lastCursorPos_ = -1;
         return;
     }
 
@@ -385,42 +396,75 @@ void FcitxFbterm::im_show() {
     rect.h = height;
     moveRectInScreen(rect);
 
-    // Only reposition window if size or position changed (avoid flicker)
-    if (rect.w != lastRect_.w || rect.h != lastRect_.h ||
-        rect.x != lastRect_.x || rect.y != lastRect_.y) {
+    // Check if window size or position changed
+    bool rectChanged = (rect.w != lastRect_.w || rect.h != lastRect_.h ||
+                        rect.x != lastRect_.x || rect.y != lastRect_.y);
+
+    // Check if content changed
+    bool contentChanged = (upSegs_ != lastUpSegs_ || downSegs_ != lastDownSegs_);
+
+    // Update window position if changed
+    if (rectChanged) {
         set_im_window(WINID_IM, rect);
         lastRect_ = rect;
-    }
-    winVisible_ = true;
-    fill_rect(rect, background_);
-
-    // Line 1: preedit
-    int x = rect.x + PAD;
-    for (auto &seg : upSegs_) {
-        draw_text(x, rect.y + PAD, foreground_, background_,
-                  seg.text.c_str(), seg.text.length());
-        x += text_width(seg.text.c_str()) * fontWidth_;
+        winVisible_ = true;
     }
 
-    // Line 2: candidates
-    x = rect.x + PAD;
-    int candY = rect.y + PAD + fontHeight_;
-    for (auto &seg : downSegs_) {
-        draw_text(x, candY, seg.color, background_,
-                  seg.text.c_str(), seg.text.length());
-        x += text_width(seg.text.c_str()) * fontWidth_;
+    // Redraw content if changed (or if window moved)
+    if ((contentChanged || rectChanged) && !skipContentRedraw) {
+        lastShowTime_ = now;
+
+        fill_rect(rect, background_);
+
+        // Line 1: preedit
+        int x = rect.x + PAD;
+        for (auto &seg : upSegs_) {
+            draw_text(x, rect.y + PAD, seg.color, background_,
+                      seg.text.c_str(), seg.text.length());
+            x += text_width(seg.text.c_str()) * fontWidth_;
+        }
+
+        // Line 2: candidates
+        x = rect.x + PAD;
+        int candY = rect.y + PAD + fontHeight_;
+        for (auto &seg : downSegs_) {
+            draw_text(x, candY, seg.color, background_,
+                      seg.text.c_str(), seg.text.length());
+            x += text_width(seg.text.c_str()) * fontWidth_;
+        }
+
+        // Cache content
+        lastUpSegs_ = upSegs_;
+        lastDownSegs_ = downSegs_;
     }
 
-    // Draw cursor on preedit line (cursorPos_ is byte offset)
-    if (cursorPos_ >= 0 && !upSegs_.empty()) {
+    // Always update cursor (not affected by rate limit)
+    if (cursorPos_ >= 0 && !upSegs_.empty() && !upSegs_[0].text.empty()) {
         auto &text = upSegs_[0].text;
-        auto byteOff =
-            std::min(static_cast<size_t>(cursorPos_), text.size());
+        auto byteOff = std::min(static_cast<size_t>(cursorPos_), text.size());
+
+        // Ensure bounds
+        if (byteOff > text.size()) byteOff = text.size();
+
         auto cellOff = static_cast<int>(
             text_width(std::string_view(text).substr(0, byteOff)));
         int cursorX = rect.x + PAD + cellOff * fontWidth_;
-        Rectangle cursorRect = {cursorX, rect.y + PAD, 1, fontHeight_};
-        fill_rect(cursorRect, foreground_);
+
+        // Ensure cursor within window bounds
+        if (cursorX >= rect.x && cursorX < rect.x + rect.w) {
+            // Clear old cursor position if changed
+            if (lastCursorPos_ >= 0 && lastCursorPos_ != cursorPos_) {
+                Rectangle oldCursorRect = {lastCursorX_, rect.y + PAD, 1, fontHeight_};
+                fill_rect(oldCursorRect, background_);
+            }
+
+            // Draw new cursor
+            Rectangle cursorRect = {cursorX, rect.y + PAD, 1, fontHeight_};
+            fill_rect(cursorRect, foreground_);
+
+            lastCursorPos_ = cursorPos_;
+            lastCursorX_ = cursorX;
+        }
     }
 }
 
