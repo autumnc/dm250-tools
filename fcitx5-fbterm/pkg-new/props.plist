@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>architecture</key>
+	<string>armv7l</string>
+	<key>homepage</key>
+	<string>https://github.com/fcitx/fcitx5-fbterm</string>
+	<key>installed_size</key>
+	<integer>272384</integer>
+	<key>license</key>
+	<string>GPL-3.0-or-later</string>
+	<key>maintainer</key>
+	<string>autumnc &lt;autumnc@users.noreply.github.com&gt;</string>
+	<key>pkgname</key>
+	<string>fcitx5-fbterm</string>
+	<key>pkgver</key>
+	<string>fcitx5-fbterm-5.1.22_1</string>
+	<key>run_depends</key>
+	<array>
+		<string>fcitx5&gt;=0</string>
+		<string>fcitx5-gclient&gt;=0</string>
+		<string>fbterm&gt;=0</string>
+	</array>
+	<key>short_desc</key>
+	<string>Fcitx5 input method frontend for fbterm - bugfixed version</string>
+	<key>sourcepkg</key>
+	<string>fcitx5-fbterm</string>
+	<key>version</key>
+	<string>5.1.22_1</string>
+</dict>
+</plist>

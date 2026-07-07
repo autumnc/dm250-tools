@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>files</key>
+	<dict>
+		<key>usr/bin/fcitx5-fbterm</key>
+		<dict>
+			<key>file</key>
+			<true/>
+			<key>sha256</key>
+			<string>9dadf561fa5f4f76a45d992c3f62be06b2b5f403b1eca21c1d0d42606c2b4675</string>
+			<key>size</key>
+			<integer>272384</integer>
+		</dict>
+	</dict>
+	<key>links</key>
+	<dict>
+	</dict>
+	<key>dirs</key>
+	<array>
+		<string>usr</string>
+		<string>usr/bin</string>
+	</array>
+</dict>
+</plist>
