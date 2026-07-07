@@ -408,6 +408,9 @@ void FcitxFbterm::im_show() {
     // When window shrinks, fbterm won't trigger expose for old area
     // because intersectRectangles returns "Inside" (new rect inside old rect)
     // We must manually clear the old area to prevent residue
+    // Save old rect Y coordinate for cursor clearing before updating lastRect_
+    unsigned lastRectY = lastRect_.y;
+
     if (rectChanged && lastRect_.w > 0 && lastRect_.h > 0) {
         fill_rect(lastRect_, background_);
     }
@@ -469,7 +472,8 @@ void FcitxFbterm::im_show() {
             //    because lastCursorX_ is in old window coordinate system
             if (lastCursorPos_ >= 0 && (lastCursorPos_ != cursorPos_ || rectChanged)) {
                 // Use lastCursorX_ (absolute coordinate from old window)
-                Rectangle oldCursorRect = {lastCursorX_, lastRect_.y + PAD, 1, fontHeight_};
+                // Use saved lastRectY (old window Y, before lastRect_ was updated)
+                Rectangle oldCursorRect = {lastCursorX_, lastRectY + PAD, 1, fontHeight_};
                 fill_rect(oldCursorRect, background_);
             }
 
@@ -483,7 +487,8 @@ void FcitxFbterm::im_show() {
     } else {
         // No cursor visible, clear old cursor if exists
         if (lastCursorPos_ >= 0) {
-            Rectangle oldCursorRect = {lastCursorX_, lastRect_.y + PAD, 1, fontHeight_};
+            // Use saved lastRectY (old window Y coordinate)
+            Rectangle oldCursorRect = {lastCursorX_, lastRectY + PAD, 1, fontHeight_};
             fill_rect(oldCursorRect, background_);
             lastCursorPos_ = -1;
         }
