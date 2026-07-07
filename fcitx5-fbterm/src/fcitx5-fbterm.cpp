@@ -408,9 +408,7 @@ void FcitxFbterm::im_show() {
     // When window shrinks, fbterm won't trigger expose for old area
     // because intersectRectangles returns "Inside" (new rect inside old rect)
     // We must manually clear the old area to prevent residue
-    // Save old rect Y coordinate for cursor clearing before updating lastRect_
-    unsigned lastRectY = lastRect_.y;
-
+    // This clears old cursor as well, so no need for explicit cursor clearing later
     if (rectChanged && lastRect_.w > 0 && lastRect_.h > 0) {
         fill_rect(lastRect_, background_);
     }
@@ -453,6 +451,22 @@ void FcitxFbterm::im_show() {
     }
 
     // Always update cursor (not affected by rate limit)
+    // Cursor residue fix: understand the drawing timeline
+    //
+    // Timeline when window moves:
+    // 1. fbterm expose clears old window (terminal background color)
+    // 2. We fill_rect(lastRect_) with candidate box background
+    // 3. We fill_rect(rect) with new window background
+    // 4. We draw text content
+    // 5. OLD cursor is still visible at old position (not cleared by steps 2-4)
+    // 6. We draw NEW cursor
+    // 7. OLD cursor position NOT marked dirty → residue!
+    //
+    // Solution: After content redraw (steps 3-4), old cursor position is covered
+    // in new window. But in old window, it needs explicit clearing.
+    // Since we already fill_rect(lastRect_), the old cursor is cleared.
+    // No need for explicit old cursor clearing!
+
     if (cursorPos_ >= 0 && !upSegs_.empty() && !upSegs_[0].text.empty()) {
         auto &text = upSegs_[0].text;
         auto byteOff = std::min(static_cast<size_t>(cursorPos_), text.size());
@@ -466,14 +480,14 @@ void FcitxFbterm::im_show() {
 
         // Ensure cursor within window bounds
         if (cursorX >= rect.x && cursorX < rect.x + rect.w) {
-            // Clear old cursor if:
-            // 1. Cursor position changed
-            // 2. OR window position/size changed (rectChanged)
-            //    because lastCursorX_ is in old window coordinate system
-            if (lastCursorPos_ >= 0 && (lastCursorPos_ != cursorPos_ || rectChanged)) {
-                // Use lastCursorX_ (absolute coordinate from old window)
-                // Use saved lastRectY (old window Y, before lastRect_ was updated)
-                Rectangle oldCursorRect = {lastCursorX_, lastRectY + PAD, 1, fontHeight_};
+            // Only clear old cursor if NO background fill happened
+            // (window unchanged AND content unchanged)
+            // In that case, old cursor position wasn't covered by fill_rect
+            bool needClearOldCursor = (lastCursorPos_ >= 0 && !rectChanged && !contentChanged);
+
+            if (needClearOldCursor) {
+                // Window didn't move, so use current window Y coordinate
+                Rectangle oldCursorRect = {lastCursorX_, rect.y + PAD, 1, fontHeight_};
                 fill_rect(oldCursorRect, background_);
             }
 
@@ -485,13 +499,12 @@ void FcitxFbterm::im_show() {
             lastCursorX_ = cursorX;
         }
     } else {
-        // No cursor visible, clear old cursor if exists
-        if (lastCursorPos_ >= 0) {
-            // Use saved lastRectY (old window Y coordinate)
-            Rectangle oldCursorRect = {lastCursorX_, lastRectY + PAD, 1, fontHeight_};
+        // No cursor visible, clear old cursor if needed
+        if (lastCursorPos_ >= 0 && !rectChanged && !contentChanged) {
+            Rectangle oldCursorRect = {lastCursorX_, rect.y + PAD, 1, fontHeight_};
             fill_rect(oldCursorRect, background_);
-            lastCursorPos_ = -1;
         }
+        lastCursorPos_ = -1;
     }
 }
 
