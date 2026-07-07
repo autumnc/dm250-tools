@@ -405,9 +405,17 @@ void FcitxFbterm::im_show() {
 
     // Update window position if changed
     if (rectChanged) {
+        // Clear old window area completely before moving
+        // This prevents border/frame artifacts when candidate box position changes
+        if (lastRect_.w > 0 && lastRect_.h > 0) {
+            fill_rect(lastRect_, background_);
+        }
+
         set_im_window(WINID_IM, rect);
         lastRect_ = rect;
         winVisible_ = true;
+        // Force content redraw when position changes to ensure clean transition
+        contentChanged = true;
     }
 
     // Redraw content if changed (or if window moved)
