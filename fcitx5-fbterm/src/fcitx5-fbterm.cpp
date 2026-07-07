@@ -397,24 +397,27 @@ void FcitxFbterm::im_show() {
     moveRectInScreen(rect);
 
     // Check if window size or position changed
-    bool rectChanged = (rect.w != lastRect_.w || rect.h != lastRect_.h ||
-                        rect.x != lastRect_.x || rect.y != lastRect_.y);
+    bool sizeChanged = (rect.w != lastRect_.w || rect.h != lastRect_.h);
+    bool positionChanged = (rect.x != lastRect_.x || rect.y != lastRect_.y);
+    bool rectChanged = (sizeChanged || positionChanged);
 
     // Check if content changed
     bool contentChanged = (upSegs_ != lastUpSegs_ || downSegs_ != lastDownSegs_);
 
-    // Update window position if changed
-    if (rectChanged) {
-        // Clear old window area completely before moving
-        // This prevents border/frame artifacts when candidate box position changes
-        if (lastRect_.w > 0 && lastRect_.h > 0) {
-            fill_rect(lastRect_, background_);
-        }
+    // Critical: Clear old window area BEFORE calling set_im_window
+    // When window shrinks, fbterm won't trigger expose for old area
+    // because intersectRectangles returns "Inside" (new rect inside old rect)
+    // We must manually clear the old area to prevent residue
+    if (rectChanged && lastRect_.w > 0 && lastRect_.h > 0) {
+        fill_rect(lastRect_, background_);
+    }
 
+    // Update window size/position
+    if (rectChanged) {
         set_im_window(WINID_IM, rect);
         lastRect_ = rect;
         winVisible_ = true;
-        // Force content redraw when position changes to ensure clean transition
+        // Force content redraw when size or position changes
         contentChanged = true;
     }
 
