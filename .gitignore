@@ -3,3 +3,4 @@ blctl/blctl
 fbblank/fbblank
 wifi-tui-armhf
 wifi-tui-armhf-static
+fcitx5-fbterm/build/
