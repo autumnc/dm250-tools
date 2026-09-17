@@ -1,0 +1,88 @@
+#!/bin/sh
+# warpnet -- bring the wifi link back after a warp resume.
+#
+# The standard pre-warp quiesce (`echo 0 > /sys/class/rkwifi/driver`) powers the
+# AP6212 off.  After the resume the *first* driver reload reliably fails: the
+# mmc core saw the card vanish while the chip was unpowered, so the first SDIO
+# read returns -ENOMEDIUM (-123), and bcmdhd aborts --
+#
+#   _dhdsdio_download_firmware: dongle image file download failed
+#   dhdsdio_htclk: Failed access turning clock off: -35
+#   sdioh_disable_func_intr: error for read SDIO_CCCR_IENx : 0xffffff85
+#   dhd_open : wl_android_wifi_on failed (-35)
+#
+# -- and it takes 2-3 dhd_open attempts to settle.  The warp core is fine (rc=0)
+# and the reload path is fine on its own (a plain cycle with no warp works first
+# try); only the reload right after a resume needs retrying.
+#
+# This service is the userspace half of that retry, because the only honest
+# success criterion is "wlan0 has an IPv4 address", which userspace alone sees.
+# Touch /run/warpnet.off to disable it (e.g. to keep wifi deliberately off).
+
+LOG=/tmp/warpnet.log
+TICK=5
+DEBOUNCE=45	# seconds without an address before acting; must exceed the
+		# warp freeze window (~20s) so we never fight the quiesce
+FROZE=12	# a TICK-second sleep that really took this long means we were
+		# frozen -- i.e. a warp just resumed, not a quiesce in progress
+MAXTRY=6
+SETTLE=15	# seconds to wait after each reload attempt
+
+log()    { echo "$(date '+%F %T') $*" >>"$LOG"; }
+# A 169.254.x.x address is APIPA -- dhcpcd gave up, the link is not really back.
+addr4()  { ip -4 addr show wlan0 2>/dev/null \
+             | /bin/grep -v 'inet 169\.254\.' \
+             | /bin/grep -oE 'inet [0-9.]+' | head -1 | cut -d' ' -f2; }
+net_up() { [ -n "$(addr4)" ]; }
+
+# Do not act while the boot-time bring-up is still in progress (dm200_wireless
+# powers the radio up and wpa_supplicant associates).
+while ! net_up; do sleep 5; done
+log "start: link up ($(addr4))"
+
+bad=0
+prev=$(date +%s)
+while :; do
+	sleep "$TICK"
+	now=$(date +%s)
+	froze=$((now - prev - TICK))
+	prev=$now
+
+	if [ -e /run/warpnet.off ] || net_up; then
+		bad=0
+		continue
+	fi
+
+	# A jump in wall-clock time means this process was frozen, which only
+	# happens across a warp -- so the warp is over and we can act at once.
+	# The debounce below exists solely to ride out the quiesce of a warp
+	# still in progress, and a freeze proves that warp has already resumed.
+	if [ "$froze" -ge "$FROZE" ]; then
+		log "resumed from freeze (+${froze}s) -- restoring"
+	else
+		bad=$((bad + TICK))
+		[ "$bad" -lt "$DEBOUNCE" ] && continue
+		log "link down ${DEBOUNCE}s -- restoring"
+	fi
+	n=0
+	while [ "$n" -lt "$MAXTRY" ]; do
+		n=$((n + 1))
+		echo 0 > /sys/class/rkwifi/driver 2>/dev/null
+		sleep 3
+		echo 1 > /sys/class/rkwifi/driver 2>/dev/null
+		sleep "$SETTLE"
+		sv up wpa_supplicant 2>/dev/null
+		sv up dhcpcd 2>/dev/null
+		sleep "$SETTLE"
+
+		if net_up; then
+			log "restored on attempt $n ($(addr4))"
+			break
+		fi
+		log "attempt $n failed (operstate=$(cat /sys/class/net/wlan0/operstate 2>&1))"
+	done
+	net_up || log "gave up after $MAXTRY attempts"
+
+	bad=0
+	prev=$(date +%s)
+done

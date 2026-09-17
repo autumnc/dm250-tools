@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /root/bin/lidscreen >>/tmp/lidscreen.log 2>&1

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /root/bin/lidwarp.sh >>/tmp/lidwarp.log 2>&1

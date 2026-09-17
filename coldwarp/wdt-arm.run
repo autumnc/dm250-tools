@@ -1,0 +1,8 @@
+#!/bin/sh
+# Arm the hardware watchdog once the kernel petter thread is up.
+# The kernel driver (rk312x_wdt) is inert at boot; this arms it.
+# If /proc/wdt is missing (kernel without the driver) skip quietly.
+# runit needs the run script to stay alive, hence the sleep loop.
+exec 2>&1
+[ -w /proc/wdt ] && echo 1 > /proc/wdt
+while :; do sleep 3600; done

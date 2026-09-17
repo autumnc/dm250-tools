@@ -1,0 +1,16 @@
+#!/bin/sh
+exec 2>&1
+# One-shot boot service: preserve any pstore record left by a previous crash,
+# then clear it so the next crash gets a fresh record. Enable panic-on-stall so
+# a hang is converted into a pstore-captured panic instead of a silent reset.
+mountpoint -q /sys/fs/pstore 2>/dev/null || mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+mkdir -p /var/log/crash
+for f in /sys/fs/pstore/*; do
+	[ -f "$f" ] || continue
+	cp -f "$f" "/var/log/crash/$(basename "$f")" 2>/dev/null
+done
+rm -f /sys/fs/pstore/* 2>/dev/null
+echo 1 > /proc/sys/kernel/softlockup_panic 2>/dev/null
+sync
+# stay resident: runit would otherwise respawn a one-shot script in a loop
+exec sleep infinity
